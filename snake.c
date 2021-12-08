@@ -15,7 +15,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +37,7 @@
 
 /* OPTIONS (CHANGE THIS BIT) */
 
-#define SNAKE_WRAP		true	/* screen wrapping */
+#define SNAKE_WRAP		false	/* screen wrapping */
 #define SPEED			0.08	/* refresh rate (in seconds) */
 #define BONUS_CHANCE	400	/* chance of 1/CHANCE for bonus to appear */
 
@@ -84,6 +84,8 @@
 #define Y 1
 
 #define IS_SNAKE(ch) (ch == SNAKE_BODY || ch == SNAKE_HEAD_U || ch == SNAKE_HEAD_D || ch == SNAKE_HEAD_L || ch == SNAKE_HEAD_R)
+
+int i, x, y;
 
 /* global states */
 enum {
@@ -145,21 +147,32 @@ int snake_rand(int min, int max) {
 	return (rand() % (max + 1 - min)) + min;
 } /* snake_rand() */
 
-void snake_init(void) {
-	/* seed randomness */
+void seed_rand() {
 	srand(time(NULL) ^ getpid());
+}
 
-	/* set defaults */
+void border_init() {
+	border = calloc(SCREEN_WIDTH + 3, 1);
+
+	for(i = 0; i < SCREEN_WIDTH; i++)
+		border[i + 1] = BORDER_HORI;
+
+	border[0] = border[SCREEN_WIDTH + 1] = BORDER_CORNER;
+} /* border_init() */
+
+void default_score() {
 	score = 0;
+}
 
-	/* snake */
+void snake_head_init() {
 	snake_len = START_SNAKE_LEN;
 	snake_head[X] = SCREEN_WIDTH / 2;
 	snake_head[Y] = SCREEN_HEIGHT / 2;
+}
 
+void snake_body_init() {
 	snake_body = malloc(snake_len * sizeof(int *));
 
-	int i;
 	for(i = 0; i < snake_len; i++) {
 		snake_body[i] = malloc(2 * sizeof(int));
 
@@ -167,40 +180,48 @@ void snake_init(void) {
 		snake_body[i][X] = snake_head[X] - i;
 		snake_body[i][Y] = snake_head[Y];
 	}
+}
 
-	/* food and bonus */
+void snake_init() {
+	snake_head_init();
+	snake_body_init();
+}
+
+void food_init() {
 	food[X] = snake_rand(0, SCREEN_WIDTH - 1);
 	food[Y] = snake_rand(0, SCREEN_HEIGHT - 1);
+}
 
+void bonus_init() {
 	bonus[X] = -1;
 	bonus[Y] = -1;
 	timer = -1;
+}
 
-	/* game state */
+void state_init() {
 	game_state = calloc(SCREEN_HEIGHT * SCREEN_WIDTH, sizeof(char *));
 	for(i = 0; i < SCREEN_WIDTH; i++) {
 		game_state[i] = calloc(SCREEN_WIDTH + 1, 1);
 		game_state[i][SCREEN_WIDTH] = '\0';
 	}
+}
 
-	/* border */
-	border = calloc(SCREEN_WIDTH + 3, 1);
+void init(void) {
+	seed_rand();
+	default_score();
+	snake_init();
+	food_init();
+	bonus_init();
+	state_init();
+	border_init();
+} /* init() */
 
-	for(i = 0; i < SCREEN_WIDTH; i++)
-		border[i + 1] = BORDER_HORI;
+void mup() { if(snake_direction != down) snake_direction = up; }
+void mdown() { if(snake_direction != up) snake_direction = down; }
+void mleft() { if(snake_direction != right) snake_direction = left; }
+void mright() { if(snake_direction != left) snake_direction = right; }
 
-	border[0] = border[SCREEN_WIDTH + 1] = BORDER_CORNER;
-} /* snake_init() */
-
-void snake_input(void) {
-	/* get non-blocking input */
-	int old = fcntl(0, F_GETFL);
-	fcntl(0, F_SETFL, fcntl(0, F_GETFL) | O_NONBLOCK);
-
-	int ch = getch();
-
-	fcntl(0, F_SETFL, old);
-
+void choose_direction(int ch) {
 	/* 'normal' input switch */
 	int weird = false;
 	switch(ch) {
@@ -210,23 +231,19 @@ void snake_input(void) {
 			break;
 		case 'w':
 		case 'W':
-			if(snake_direction != down)
-				snake_direction = up;
+			mup();
 			break;
 		case 's':
 		case 'S':
-			if(snake_direction != up)
-				snake_direction = down;
+			mdown();
 			break;
 		case 'd':
 		case 'D':
-			if(snake_direction != left)
-				snake_direction = right;
+			mright();
 			break;
 		case 'a':
 		case 'A':
-			if(snake_direction != right)
-				snake_direction = left;
+			mleft();
 			break;
 		case 27:
 			weird = true;
@@ -241,25 +258,37 @@ void snake_input(void) {
 	if(ch == 27 && getch() == 91) {
 		switch(getch()) {
 			case 65:
-				if(snake_direction != down)
-					snake_direction = up;
+				mup();
 				break;
 			case 66:
-				if(snake_direction != up)
-					snake_direction = down;
+				mdown();
 				break;
 			case 67:
-				if(snake_direction != left)
-					snake_direction = right;
+				mright();
 				break;
 			case 68:
-				if(snake_direction != right)
-					snake_direction = left;
+				mleft();
 				break;
 			default:
 				break;
 		}
 	}
+}
+
+int non_blocking_input() {
+	/* get non-blocking input */
+	int old = fcntl(0, F_GETFL);
+	fcntl(0, F_SETFL, fcntl(0, F_GETFL) | O_NONBLOCK);
+
+	int ch = getch();
+
+	fcntl(0, F_SETFL, old);
+
+	return ch;
+}
+
+void snake_input(void) {
+	choose_direction(non_blocking_input());
 } /* snake_input() */
 
 /* GAME STATE:
@@ -301,8 +330,7 @@ int in_snake(int x, int y) {
 	return false;
 } /* in_snake() */
 
-void snake_update(void) {
-	/* first, update snake head */
+void snake_head_update() {
 	switch(snake_direction) {
 		case up:
 			snake_head[Y]--;
@@ -317,17 +345,19 @@ void snake_update(void) {
 			snake_head[X]++;
 			break;
 	}
+}
 
-	/* check if snake intersects body -- and quit appropriately */
-	int i;
+bool snake_intersects() {
 	for(i = 1; i < snake_len; i++) {
 		if(snake_head[X] == snake_body[i][X] && snake_head[Y] == snake_body[i][Y]) {
 			quit = true;
-			return;
+			return true;
 		}
 	}
+	 return false;
+}
 
-
+bool snake_is_outside_screen() {
 	/* check if snake is outside screen */
 	if(snake_head[Y] < 0 || snake_head[Y] >= SCREEN_HEIGHT ||
 	   snake_head[X] < 0 || snake_head[X] >= SCREEN_WIDTH) {
@@ -341,12 +371,13 @@ void snake_update(void) {
 		} else {
 			/* otherwise, game over */
 			quit = true;
-			return;
+			return true;
 		}
-
 	}
+	return false;
+}
 
-	/* check if food has been eaten */
+void eat_food() {
 	if(snake_head[X] == food[X] && snake_head[Y] == food[Y]) {
 		/* update score */
 		score += FOOD_SCORE;
@@ -368,8 +399,9 @@ void snake_update(void) {
 			food[Y] = snake_rand(0, SCREEN_HEIGHT - 1);
 		} while(in_snake(food[X], food[Y]) || (food[X] == bonus[X] && food[Y] == bonus[Y]));
 	}
+}
 
-	/* if snake eats bonus */
+void eat_bonus() {
 	if(snake_head[X] == bonus[X] && snake_head[Y] == bonus[Y]) {
 		/* update score */
 		score += BONUS_SCORE;
@@ -379,7 +411,9 @@ void snake_update(void) {
 		bonus[Y] = -1;
 		timer = -1;
 	}
+}
 
+void update_bonus() {
 	/* updating bonus */
 	if(bonus[X] >= 0 && bonus[Y] >= 0) {
 		/* decrement bonus timer */
@@ -404,20 +438,17 @@ void snake_update(void) {
 			timer = snake_rand(BONUS_MIN_TIME, BONUS_MAX_TIME);
 		}
 	}
+}
 
-	shift_snake();
-
-	/* -- update string representation of game -- */
-
-	/* clear */
-	int x, y;
+void clear_screen() {
 	for(y = 0; y < SCREEN_HEIGHT; y++) {
 		for(x = 0; x < SCREEN_WIDTH; x++) {
 			game_state[y][x] = ' ';
 		}
 	}
+}
 
-	/* add snake body */
+void draw_snake() {
 	for(i = 1; i < snake_len; i++) {
 		x = snake_body[i][X];
 		y = snake_body[i][Y];
@@ -428,19 +459,23 @@ void snake_update(void) {
 
 		game_state[y][x] = SNAKE_BODY;
 	}
+}
 
-	/* add food */
+void draw_food() {
 	x = food[X];
 	y = food[Y];
 	if(x >= 0 && y >= 0)
 		game_state[y][x] = FOOD;
+}
 
-	/* add bonus */
+void draw_bonus() {
 	x = bonus[X];
 	y = bonus[Y];
 	if(x >= 0 && y >= 0)
 		game_state[y][x] = BONUS;
+}
 
+void draw_snake_head() {
 	/* add snake head */
 	x = snake_head[X];
 	y = snake_head[Y];
@@ -462,6 +497,22 @@ void snake_update(void) {
 		}
 		game_state[y][x] = head;
 	}
+}
+
+void snake_update(void) {
+	snake_head_update();
+	if (snake_intersects()) return;
+	if (snake_is_outside_screen()) return;
+	eat_food();
+	eat_bonus();
+	update_bonus();
+	shift_snake();
+
+	clear_screen();
+	draw_snake();
+	draw_food();
+	draw_bonus();
+	draw_snake_head();
 } /* snake_update() */
 
 void clr_line(void) {
@@ -472,38 +523,44 @@ void clr_line(void) {
 	fflush(stdout);
 } /* clr_line() */
 
-void snake_redraw(void) {
-	/* move virtual cursor to top left */
-	printf("\x1b[H");
-	fflush(stdout);
-
-	/* top border */
-	printf("%s\n", border);
-
-	/* print game state */
-	int i;
+void print_game_state() {
 	for(i = 0; i < SCREEN_HEIGHT; i++)
 		printf("%c%s%c\n", BORDER_VERT, game_state[i], BORDER_VERT);
+}
 
-	/* bottom border */
-	printf("%s\n", border);
-
-	/* print score */
+void print_score() {
 	clr_line();
 	printf("\n" SCORE_FORMAT "\n", score);
+}
 
-	/* if a timer exists, print it */
+void print_timer() {
 	if(timer >= 0) {
 		clr_line();
 		printf(TIMER_FORMAT "\n", timer);
 	}
+}
 
+void print_border() {
+	printf("%s\n", border);
+}
+
+void move_cursor(int row, int column) {
+	printf("\x1b[%d;%df", row, column);
+	fflush(stdout);
+} /* snake_redraw() */
+
+
+void snake_redraw(void) {
+	move_cursor(0, 0);
+	print_border();
+	print_game_state();
+	print_border();
+	print_score();
+	print_timer();
 	clr_line();
 } /* snake_redraw() */
 
 int snake_end_state(void) {
-	int x, y;
-
 	for(y = 0; y < SCREEN_HEIGHT; y++)
 		for(x = 0; x < SCREEN_WIDTH; x++)
 			if(!IS_SNAKE(game_state[y][x]))
@@ -512,21 +569,12 @@ int snake_end_state(void) {
 	return win;
 } /* snake_end_state() */
 
-void move_cursor(int row, int column) {
-	printf("\x1b[%d;%df", row, column);
-	fflush(stdout);
-} /* snake_redraw() */
-
-int main(void) {
-	/* clear screen */
+void clr_screen() {
 	printf("\x1b[H\x1b[2J");
 	fflush(stdout);
+}
 
-	/* intialise snake */
-	snake_init();
-	snake_redraw();
-
-	/* main snake loop */
+void main_loop() {
 	while(!quit) {
 		snake_input();  /* get input */
 		snake_update(); /* update game state */
@@ -535,8 +583,9 @@ int main(void) {
 		/* wait SPEED seconds */
 		usleep(SPEED * 1000000L);
 	}
+}
 
-	/* end game */
+void end_game() {
 	char *msg = NULL;
 	int end_state = snake_end_state();
 
@@ -553,9 +602,9 @@ int main(void) {
 	move_cursor((SCREEN_HEIGHT / 2) + 2, (SCREEN_WIDTH / 2) - (strlen(msg) / 2) + 2);
 	printf("%s%s%s", ANSI_RED, msg, ANSI_CLEAR);
 	fflush(stdout);
+}
 
-	/* free memory */
-	int i;
+void free_memory() {
 	for(i = 0; i < SCREEN_HEIGHT * SCREEN_WIDTH; i++)
 		free(game_state[i]);
 	free(game_state);
@@ -564,6 +613,17 @@ int main(void) {
 		free(snake_body[i]);
 	free(snake_body);
 	free(border);
+}
+
+int main(void) {
+	clr_screen();
+
+	/* intialise snake */
+	init();
+	snake_redraw();
+
+	main_loop();
+	end_game();
 
 	move_cursor(SCREEN_HEIGHT + 5 + (timer >= 0), 0); /* move to default, screen_height + borders + spaces for score, etc. */
 	return 0;
